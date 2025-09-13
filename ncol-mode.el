@@ -1,18 +1,41 @@
-;; -*- lexical-binding: t -*-
+;;; ncol-mode.el --- Window management in vertical columns -*- lexical-binding: t -*-
 
+;;; Commentary:
+;; ncol-mode: This packages implements display-buffer functions for window
+;; management.  The windows are arranged in vertical columns until the
+;; column width falls below the minimal width, then each new window splits
+;; a column horizontally.
+
+;;; Code:
 (require 'dash)
 (require 'window)
 
+(defgroup ncol-mode nil
+  "Window management in vertical columns until minimum width is reached.
+Then split horizontally."
+  :group 'windows
+  :prefix "ncol-")
+
+(defcustom ncol-column-min-width 80
+  "The minimal width a column can have after a vertical split.
+If a vertical split would make columns narrower than this,
+then the split is performed horizontally instead.
+
+This is a user option and can be customized."
+  :type 'integer
+  :group 'ncol-mode)
+
 (defvar ncol-previous-display-buffer-state nil
-  "The value of `display-buffer-base-action` to restore when ncol-mode is
-deactivated.")
+  "The previous value of `display-buffer-base-action`.
+The value is restored when ncol-mode is deactivated.")
 
-(defvar ncol-column-min-width 80
-  "The minimal width a column can have after a vertical split. Otherwise the split will be done horizontally.")
-
-(defun ncol--window-tree () (car (window-tree)))
+(defun ncol--window-tree ()
+  "Wrap `window-tree' function to skip metadata."
+  (car (window-tree)))
 
 (defun ncol--find-topmost-vertical-split (tree)
+  "Find the topmost vertical split inside TREE.
+The found split is the one that is managed by this package."
   (cond
    ;; I'm seeing a window without a split
    ((windowp tree)
@@ -27,29 +50,36 @@ deactivated.")
       tree))))
 
 (defun ncol--find-first-window (tree)
+  "Find the first window in a (sub) TREE."
   (cond ((windowp tree)
          tree)
         ((listp tree)
          (-find (lambda (node) (windowp node)) (cddr tree)))))
 
 (defun ncol--find-last-window (tree)
+  "Find the last window in a (sub) TREE."
   (cond ((windowp tree)
          tree)
         ((listp tree)
          (-find (lambda (node) (windowp node)) (nreverse (cddr tree))))))
 
 (defun ncol--size-of-split (tree)
+  "Count the vertical splits in a (sub) TREE."
   (cond ((windowp tree)
          1)
         ((listp tree)
          (length (cddr tree)))))
 
 (defun ncol--window-ancestor (window n)
+  "Find the ancestor of WINDOW of degree N.
+0 is the window itself, 1 is the parent, 2 the grandparent and so on."
   (if (= n 0)
       window
     (ncol--window-ancestor (window-parent window) (1-  n))))
 
 (defun ncol--split-descend-iter (window-or-split depth)
+  "Descend into a WINDOW-OR-SPLIT until a leaf is encountered.
+Counting the DEPTH, return the ancestor of the window of degree DEPTH."
   (cond (;; is a window, unwind
          (windowp window-or-split)
          (ncol--window-ancestor window-or-split depth))
@@ -60,10 +90,11 @@ deactivated.")
 
         (;; error
          t
-         (error "ncol--split-to-window: unexpected object."))))
+         (error "Enountered an object of unexpected type"))))
 
 (defun ncol--windows-of-split (split)
-  "Convert a SPLIT into a list of child windows. A subsplit is converted to the parent of the first child."
+  "Convert a SPLIT into a list of child windows.
+A subsplit is converted to the parent of the first child."
   (-map (lambda (item)
           (cond (;; first
                  (window-live-p item)
@@ -75,11 +106,12 @@ deactivated.")
 
                 (;; error
                  t
-                 ("ncol--window-of-split: unexpected object"))))
+                 (error "Enountered an object of unexpected type"))))
         (cddr split)))
 
 (defun ncol--window-descendent-p (window parent)
-  "Check if WINDOW is descendent of PARENT. A window is a descendent of itself. The windows don't have to be live."
+  "Check if WINDOW is descendent of PARENT.
+A window is a descendent of itself.  The windows don't have to be live."
   (cond ((null window)
          nil)
 
@@ -91,16 +123,18 @@ deactivated.")
          (ncol--window-descendent-p (window-parent window) parent))))
 
 (defun ncol--rebalance-n-columns ()
-  "Rebalance top-level column window group as defined by
-`ncol--display-buffer-n-columns'. Intended for `window-state-change-hook'."
+  "Rebalance top-level column window group.
+The group is a split as defined by `ncol--display-buffer-n-columns'.
+Intended for `window-state-change-hook'."
   (balance-windows
    (window-parent
     (ncol--find-first-window
      (ncol--find-topmost-vertical-split (ncol--window-tree))))))
 
-(defun ncol-display-buffer-n-columns (buffer alist)
-  "Split the current column to the right if the new column would have width
-exceeding `ncol-column-min-width'."
+(defun ncol-display-buffer-n-columns (buffer _)
+  "Split the current column to the right and display BUFFER.
+If the new column would have width exceeding `ncol-column-min-width'.
+This function conforms to `display-buffer'."
   (let* ((top-columns
           (ncol--windows-of-split
            (ncol--find-topmost-vertical-split
@@ -119,16 +153,17 @@ exceeding `ncol-column-min-width'."
         (select-window new-window))
       )))
 
-(defun ncol-display-buffer-split-below (buffer alist)
+(defun ncol-display-buffer-split-below (buffer _)
+  "Split the current column horizontally and display BUFFER.
+This function conforms to `display-buffer'."
   (let ((new-window (split-window (selected-window) nil 'below)))
     (add-hook 'window-state-change-hook #'ncol--rebalance-n-columns)
     (set-window-buffer new-window buffer)
     (balance-windows (window-parent new-window))
     (select-window new-window)))
 
-(defun ncol-display-buffer-replace-ibuffer (buffer alist)
-  "If the current buffer is the ibuffer then display BUFFER in the ibuffer
-window."
+(defun ncol-display-buffer-replace-ibuffer (buffer _)
+  "Display BUFFER in the current window if it displays `ibuffer', replacing it."
   (when (string= (buffer-name (current-buffer)) "*Ibuffer*")
     (let ((window (get-buffer-window (current-buffer))))
       (set-window-buffer window buffer)
@@ -139,7 +174,8 @@ window."
                                          ncol-display-buffer-n-columns
                                          ncol-display-buffer-split-below)
                                         . ((reusable-frames . nil)))
-  "Structured like `display-buffer-base-action' etc. You can customize of
+  "Defines a list of `display-buffer' actions.
+It is structured like `display-buffer-base-action' etc. You can customize how
 ncol-mode displays buffers by interleaving your own desired functions."
   :type display-buffer--action-custom-type ;; from window.el
   :risky t
@@ -152,11 +188,12 @@ ncol-mode displays buffers by interleaving your own desired functions."
                                      (interactive)
                                      (dired-other-window default-directory)))
     -map)
-  "Keymap for `my/display-buffer-mode'.")
+  "Keymap for `ncol-mode'.")
 
 (define-minor-mode ncol-mode
   "Toggle a special buffer display configuration."
   :global t
+  :group 'ncol-mode
   :lighter " ncol"
   (if ncol-mode
       ;; Enabling
@@ -168,3 +205,6 @@ ncol-mode displays buffers by interleaving your own desired functions."
     (progn
       (setq display-buffer-base-action ncol-previous-display-buffer-state)
       (remove-hook 'window-state-change-hook #'ncol--rebalance-n-columns))))
+
+(provide 'ncol-mode)
+;;; ncol-mode.el ends here
