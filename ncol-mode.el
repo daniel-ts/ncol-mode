@@ -149,7 +149,7 @@ ncol-mode displays buffers by interleaving your own desired functions."
     (define-key -map (kbd "C-x d") (lambda ()
                                      (interactive)
                                      (dired-other-window default-directory)))
-    map)
+    -map)
   "Keymap for `my/display-buffer-mode'.")
 
 (define-minor-mode ncol-mode
