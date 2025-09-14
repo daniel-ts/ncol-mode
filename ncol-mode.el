@@ -45,9 +45,6 @@ windows or splits in the rest, like:
 \(nil (0 0 160 73)
      #<window 3 on *scratch*>
      (t (80 0 160 73) #<window 35 on *Help*> #<window 37 on *Help*>))"
-
-
-
   (cl-labels ((list-or-window-p (obj)
                 (or (and (listp obj) obj)
                     (windowp obj))))
@@ -68,36 +65,54 @@ That is: it's either a window or a window split as defined by
   (or (windowp tree)
       (ncol--window-split-p tree)))
 
-(defun ncol--find-topmost-split (tree &optional horizontal)
+(defun ncol--find-topmost-split (tree &optional direction)
   "Find the topmost split inside TREE.
 
-The split will be horizontal if HORIZONTAL is t, vertical when nil.
+The split will be horizontal if DIRECTION 'horizontal, vertical when
+'vertical and any split when 'any.
 
 The found split is the one that is managed by this package.
 In case there either not HORIZONTAL or vertical splits, return nil."
-  (let (;; coerce into a boolean
-        (split-dir (if horizontal t nil)))
-    (cond
-     (;; I'm seeing a window without a split
-      (windowp tree)
-      tree)
+  (cl-labels ((iter (tree dir)
+                (cond (;; Seeing a window without a split
+                       (windowp tree)
+                       tree)
 
-     (;; I'm seeing a split
-      (ncol--window-split-p tree)
-      (if (eq (car tree) split-dir)
-          ;; found split-dir split: return
-          tree
+                      (;; Seeing a split
+                       (ncol--window-split-p tree)
+                       (if (eq (car tree) dir)
+                           tree ;; found split-dir split: return
 
-        ;; found inverse split: descend to first found split
-        (let ((subtree (-find #'ncol--window-split-p (ncol--descend tree))))
-          (if (null subtree)
-              ;; There are no further splits and I have only seen splits inverse
-              ;; to split-dir: return
-              nil
-            ;; descend
-            (ncol--find-topmost-split subtree split-dir)))
-        ;; found desired split
-        tree)))))
+                         ;; found inverse split: descend to first found split
+                         (let ((subtree
+                                (-find #'ncol--window-split-p
+                                       (ncol--descend tree))))
+                           (if (null subtree)
+                               ;; There are no further splits and I have only
+                               ;; seen splits inverse to split-dir: return
+                               nil
+                             ;; descend
+                             (iter subtree dir)))
+                         )))))
+
+    (cond (;; no splits
+           (windowp tree)
+           tree)
+
+          (;; not a tree but direction any
+           (eq direction 'any)
+           tree)
+
+          (t
+           (iter tree
+                 (cond ((eq direction 'horizontal)
+                        t)
+
+                       ((eq direction 'vertical)
+                        nil)
+
+                       (t (error "%s is not a valid direction"
+                                 (symbol-name direction)))))))))
 
 ;; (defun ncol--find-first-window (tree)
 ;;   "Find the first window in a (sub) TREE."
@@ -195,7 +210,7 @@ Intended for `window-state-change-hook'."
 If the new column would have width exceeding `ncol-column-min-width'.
 This function conforms to `display-buffer'."
   (let* ((topmost (ncol--find-topmost-split
-                   (ncol--window-tree)))
+                   (ncol--window-tree) 'vertical))
          (top-columns
           (if topmost
               (ncol--windows-of-split topmost)
@@ -223,7 +238,7 @@ This function conforms to `display-buffer'."
   "Split the current row below and display BUFFER.
 But only if the topmost split is horizontal.
 This function conforms to `display-buffer'."
-  (let* ((topmost (ncol--find-topmost-split (ncol--window-tree) t))
+  (let* ((topmost (ncol--find-topmost-split (ncol--window-tree) 'horizontal))
          (top-rows
           (if topmost
               (ncol--windows-of-split topmost)
