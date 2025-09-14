@@ -34,6 +34,9 @@ The value is restored when ncol-mode is deactivated.")
   "Wrap `window-tree' function to skip metadata."
   (car (window-tree)))
 
+(defalias 'ncol--descend 'cddr
+  "Descend into the split of TREE.")
+
 (defun ncol--window-split-p (tree)
   "Return t if TREE is an actual window tree split.
 That is: a list of 4 elements with a boolean car, a listp cadr and
@@ -43,17 +46,20 @@ windows or splits in the rest, like:
      #<window 3 on *scratch*>
      (t (80 0 160 73) #<window 35 on *Help*> #<window 37 on *Help*>))"
 
+
+
   (cl-labels ((list-or-window-p (obj)
                 (or (and (listp obj) obj)
                     (windowp obj))))
-    (let ((2nd (cadr tree))
-          (rest (cddr tree)))
-      (and (booleanp (car tree))
-           (and (listp 2nd)
-                (= (length 2nd) 4)
-                (-all-p #'numberp 2nd))
-           (and rest
-                (-all-p #'list-or-window-p rest))))))
+    (when (listp tree)
+      (let ((2nd (cadr tree))
+            (rest (ncol--descend tree)))
+        (and (booleanp (car tree))
+             (and (listp 2nd)
+                  (= (length 2nd) 4)
+                  (-all-p #'numberp 2nd))
+             (and rest
+                  (-all-p #'list-or-window-p rest)))))))
 
 (defun ncol--window-tree-p (tree)
   "Return t if TREE is an actual window tree split.
@@ -62,46 +68,64 @@ That is: it's either a window or a window split as defined by
   (or (windowp tree)
       (ncol--window-split-p tree)))
 
-(defun ncol--find-topmost-vertical-split (tree)
-  "Find the topmost vertical split inside TREE.
-The found split is the one that is managed by this package.
-In case there are only vertical splits, return nil."
-  (cond
-   (;; I'm seeing a window without a split
-    (windowp tree)
-    tree)
+(defun ncol--find-topmost-split (tree &optional horizontal)
+  "Find the topmost split inside TREE.
 
-   (;; I'm seeing a split
-    (ncol--window-split-p tree)
-    (if (car tree) ; yields t or nil
-        ;; found horizontal split: descend to first found split
-        (let ((subtree (-find (lambda (node) (listp node)) (cddr tree))))
+The split will be horizontal if HORIZONTAL is t, vertical when nil.
+
+The found split is the one that is managed by this package.
+In case there either not HORIZONTAL or vertical splits, return nil."
+  (let (;; coerce into a boolean
+        (split-dir (if horizontal t nil)))
+    (cond
+     (;; I'm seeing a window without a split
+      (windowp tree)
+      tree)
+
+     (;; I'm seeing a split
+      (ncol--window-split-p tree)
+      (if (eq (car tree) split-dir)
+          ;; found split-dir split: return
+          tree
+
+        ;; found inverse split: descend to first found split
+        (let ((subtree (-find #'ncol--window-split-p (ncol--descend tree))))
           (if (null subtree)
-              nil  ; I have only seen horizontal splits: return
-            (ncol--find-topmost-vertical-split subtree)))
-      ;; found vertical split: find first window and return it's parent
-      tree))))
+              ;; There are no further splits and I have only seen splits inverse
+              ;; to split-dir: return
+              nil
+            ;; descend
+            (ncol--find-topmost-split subtree split-dir)))
+        ;; found desired split
+        tree)))))
+
+;; (defun ncol--find-first-window (tree)
+;;   "Find the first window in a (sub) TREE."
+;;   (cond ((windowp tree)
+;;          tree)
+;;         ((ncol--window-split-p tree)
+;;          (-find #'windowp (ncol--descend tree)))))
 
 (defun ncol--find-first-window (tree)
-  "Find the first window in a (sub) TREE."
-  (cond ((windowp tree)
-         tree)
-        ((listp tree)
-         (-find (lambda (node) (windowp node)) (cddr tree)))))
+  "Find the first window in a (sub) TREE via depth-first search.
+Each split contains a window."
+  (if (windowp tree)
+      tree
+    (ncol--find-first-window (car (ncol--descend tree)))))
 
-(defun ncol--find-last-window (tree)
-  "Find the last window in a (sub) TREE."
-  (cond ((windowp tree)
-         tree)
-        ((listp tree)
-         (-find (lambda (node) (windowp node)) (nreverse (cddr tree))))))
+;; (defun ncol--find-last-window (tree)
+;;   "Find the last window in a (sub) TREE."
+;;   (cond ((windowp tree)
+;;          tree)
+;;         ((ncol--window-split-p tree)
+;;          (-find (lambda (node) (windowp node)) (nreverse (ncol--descend tree))))))
 
 (defun ncol--size-of-split (tree)
-  "Count the vertical splits in a (sub) TREE."
+  "Count the splits in a (sub) TREE."
   (cond ((windowp tree)
          1)
-        ((listp tree)
-         (length (cddr tree)))))
+        ((ncol--window-split-p tree)
+         (length (ncol--descend tree)))))
 
 (defun ncol--window-ancestor (window n)
   "Find the ancestor of WINDOW of degree N.
@@ -118,7 +142,7 @@ Counting the DEPTH, return the ancestor of the window of degree DEPTH."
          (ncol--window-ancestor window-or-split depth))
 
         (;; is a split: descend
-         (listp window-or-split)
+         (ncol--window-split-p window-or-split)
          (ncol--split-descend-iter (caddr window-or-split) (1+ depth)))
 
         (;; error
@@ -126,9 +150,9 @@ Counting the DEPTH, return the ancestor of the window of degree DEPTH."
          (error "Enountered an object of unexpected type"))))
 
 (defun ncol--windows-of-split (split)
-  "Convert a SPLIT into a list of child windows.
+  "Convert a SPLIT into a list of windows.
 A subsplit is converted to the parent of the first child."
-  (cond (;; a column is either a window
+  (cond (;; is either a window
          (windowp split)
          (list split))
         (;; or a split of windows
@@ -137,7 +161,7 @@ A subsplit is converted to the parent of the first child."
                  (if (window-live-p item)
                      item
                    (ncol--split-descend-iter item 0)))
-               (cddr split)))
+               (ncol--descend split)))
         (;; everything else is an error
          t (error
             "Enountered an object of unexpected type: %s"
@@ -160,16 +184,17 @@ A window is a descendent of itself.  The windows don't have to be live."
   "Rebalance top-level column window group.
 The group is a split as defined by `ncol--display-buffer-n-columns'.
 Intended for `window-state-change-hook'."
-  (balance-windows
-   (window-parent
-    (ncol--find-first-window
-     (ncol--find-topmost-vertical-split (ncol--window-tree))))))
+  (when (ncol--window-split-p (ncol--window-tree))
+    (balance-windows
+     (window-parent
+      (ncol--find-first-window
+       (ncol--window-tree))))))
 
 (defun ncol-display-buffer-n-columns (buffer _)
   "Split the current column to the right and display BUFFER.
 If the new column would have width exceeding `ncol-column-min-width'.
 This function conforms to `display-buffer'."
-  (let* ((topmost (ncol--find-topmost-vertical-split
+  (let* ((topmost (ncol--find-topmost-split
                    (ncol--window-tree)))
          (top-columns
           (if topmost
@@ -194,6 +219,28 @@ This function conforms to `display-buffer'."
         (select-window new-window))
       )))
 
+(defun ncol-display-buffer-in-rows (buffer _)
+  "Split the current row below and display BUFFER.
+But only if the topmost split is horizontal.
+This function conforms to `display-buffer'."
+  (let* ((topmost (ncol--find-topmost-split (ncol--window-tree) t))
+         (top-rows
+          (if topmost
+              (ncol--windows-of-split topmost)
+            nil)))
+
+    (when (and (ncol--window-split-p topmost) ;; not a single window
+               (car topmost)) ;; t means horizontal
+      ;; split only if the topmost split is horizontal
+      (let* ((row-to-split
+              (-find  (lambda (row) (ncol--window-descendent-p (selected-window) row))
+                      top-rows))
+             (new-window (split-window row-to-split nil 'below)))
+
+        (set-window-buffer new-window buffer)
+        (balance-windows (window-parent new-window))
+        (select-window new-window)))))
+
 (defun ncol-display-buffer-split-below (buffer _)
   "Split the current column horizontally and display BUFFER.
 This function conforms to `display-buffer'."
@@ -213,6 +260,7 @@ This function conforms to `display-buffer'."
 (defcustom display-buffer-ncol-action '((display-buffer-reuse-window
                                          ncol-display-buffer-replace-ibuffer
                                          ncol-display-buffer-n-columns
+                                         ncol-display-buffer-in-rows
                                          ncol-display-buffer-split-below)
                                         . ((reusable-frames . nil)))
   "Defines a list of `display-buffer' actions.
