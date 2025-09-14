@@ -7,6 +7,7 @@
 ;; a column horizontally.
 
 ;;; Code:
+(require 'cl-lib)
 (require 'dash)
 (require 'window)
 
@@ -17,7 +18,7 @@ Then split horizontally."
   :prefix "ncol-")
 
 (defcustom ncol-column-min-width 80
-  "The minimal width a column can have after a vertical split.
+  "The minimal width a column must have after a vertical split.
 If a vertical split would make columns narrower than this,
 then the split is performed horizontally instead.
 
@@ -33,19 +34,51 @@ The value is restored when ncol-mode is deactivated.")
   "Wrap `window-tree' function to skip metadata."
   (car (window-tree)))
 
+(defun ncol--window-split-p (tree)
+  "Return t if TREE is an actual window tree split.
+That is: a list of 4 elements with a boolean car, a listp cadr and
+windows or splits in the rest, like:
+
+\(nil (0 0 160 73)
+     #<window 3 on *scratch*>
+     (t (80 0 160 73) #<window 35 on *Help*> #<window 37 on *Help*>))"
+
+  (cl-labels ((list-or-window-p (obj)
+                (or (and (listp obj) obj)
+                    (windowp obj))))
+    (let ((2nd (cadr tree))
+          (rest (cddr tree)))
+      (and (booleanp (car tree))
+           (and (listp 2nd)
+                (= (length 2nd) 4)
+                (-all-p #'numberp 2nd))
+           (and rest
+                (-all-p #'list-or-window-p rest))))))
+
+(defun ncol--window-tree-p (tree)
+  "Return t if TREE is an actual window tree split.
+That is: it's either a window or a window split as defined by
+`ncol--window-split-p'"
+  (or (windowp tree)
+      (ncol--window-split-p tree)))
+
 (defun ncol--find-topmost-vertical-split (tree)
   "Find the topmost vertical split inside TREE.
-The found split is the one that is managed by this package."
+The found split is the one that is managed by this package.
+In case there are only vertical splits, return nil."
   (cond
-   ;; I'm seeing a window without a split
-   ((windowp tree)
-    (list tree))
+   (;; I'm seeing a window without a split
+    (windowp tree)
+    tree)
 
-   ;; I'm seeing a split
-   ((listp tree)
+   (;; I'm seeing a split
+    (ncol--window-split-p tree)
     (if (car tree) ; yields t or nil
         ;; found horizontal split: descend to first found split
-        (ncol--find-topmost-vertical-split (-find (lambda (node) (listp node)) (cddr tree)))
+        (let ((subtree (-find (lambda (node) (listp node)) (cddr tree))))
+          (if (null subtree)
+              nil  ; I have only seen horizontal splits: return
+            (ncol--find-topmost-vertical-split subtree)))
       ;; found vertical split: find first window and return it's parent
       tree))))
 
@@ -95,19 +128,20 @@ Counting the DEPTH, return the ancestor of the window of degree DEPTH."
 (defun ncol--windows-of-split (split)
   "Convert a SPLIT into a list of child windows.
 A subsplit is converted to the parent of the first child."
-  (-map (lambda (item)
-          (cond (;; first
-                 (window-live-p item)
-                 item)
-
-                (;; asdf
-                 (listp item)
-                 (ncol--split-descend-iter item 0))
-
-                (;; error
-                 t
-                 (error "Enountered an object of unexpected type"))))
-        (cddr split)))
+  (cond (;; a column is either a window
+         (windowp split)
+         (list split))
+        (;; or a split of windows
+         (ncol--window-split-p split)
+         (-map (lambda (item)
+                 (if (window-live-p item)
+                     item
+                   (ncol--split-descend-iter item 0)))
+               (cddr split)))
+        (;; everything else is an error
+         t (error
+            "Enountered an object of unexpected type: %s"
+            (type-of split)))))
 
 (defun ncol--window-descendent-p (window parent)
   "Check if WINDOW is descendent of PARENT.
@@ -135,11 +169,18 @@ Intended for `window-state-change-hook'."
   "Split the current column to the right and display BUFFER.
 If the new column would have width exceeding `ncol-column-min-width'.
 This function conforms to `display-buffer'."
-  (let* ((top-columns
-          (ncol--windows-of-split
-           (ncol--find-topmost-vertical-split
-            (ncol--window-tree))))
-         (column-count (length top-columns))
+  (let* ((topmost (ncol--find-topmost-vertical-split
+                   (ncol--window-tree)))
+         (top-columns
+          (if topmost
+              (ncol--windows-of-split topmost)
+            nil))
+         (column-count
+          (if topmost
+              ;; there is a topmost vertical split: count the columns
+              (length top-columns)
+            ;; there is no topmost vertical split: there is only one column
+            1))
          (resulting-width (/ (frame-width) (+ column-count 1))))
 
     (when (>= resulting-width ncol-column-min-width)
