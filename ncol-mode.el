@@ -233,7 +233,9 @@ This function conforms to `display-buffer'."
                (car topmost)) ;; t means horizontal
       ;; split only if the topmost split is horizontal
       (let* ((row-to-split
-              (-find  (lambda (row) (ncol--window-descendent-p (selected-window) row))
+              ;; find the row in top-rows the current window is in
+              (-find (lambda (row)
+                       (ncol--window-descendent-p (selected-window) row))
                       top-rows))
              (new-window (split-window row-to-split nil 'below)))
 
