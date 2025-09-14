@@ -1,0 +1,8 @@
+#+TITLE: Emacs ncol-mode
+
+This package supplies the global =ncol-mode= minor mode that defines a couple of
+[[https://www.gnu.org/software/emacs/manual/html_node/elisp/Buffer-Display-Action-Functions.html][display-buffer action functions]] which new buffers in a column next to the
+current column. When a threshold on the width is reached, the columns are split
+horizontally.
+
+It find it very simple but pleasant.
