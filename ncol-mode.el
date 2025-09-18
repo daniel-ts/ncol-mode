@@ -17,6 +17,10 @@ Then split horizontally."
   :group 'windows
   :prefix "ncol-")
 
+(defconst ncol--tag-magic-number
+  (random)
+  "A random integer that serves as the value for the window ncol-tag.")
+
 (defcustom ncol-column-min-width 80
   "The minimal width a column must have after a vertical split.
 If a vertical split would make columns narrower than this,
@@ -68,8 +72,8 @@ That is: it's either a window or a window split as defined by
 (defun ncol--find-topmost-split (tree &optional direction)
   "Find the topmost split inside TREE.
 
-The split will be horizontal if DIRECTION 'horizontal, vertical when
-'vertical and any split when 'any.
+The split will be horizontal if DIRECTION \\='horizontal', vertical when
+\\='vertical' and any split when \\='any'.
 
 The found split is the one that is managed by this package.
 In case there either not HORIZONTAL or vertical splits, return nil."
@@ -194,6 +198,66 @@ A window is a descendent of itself.  The windows don't have to be live."
         (;; recur
          t
          (ncol--window-descendent-p (window-parent window) parent))))
+
+(defun window-of-split (split)
+  "Return the split window of SPLIT."
+  (cl-labels (;; walk the split to find a window and walk up its descendents
+              (iter (cur rest depth)
+                (if (windowp cur)
+                    (ncol--window-ancestor cur depth)
+                  (let ((-rest (nconc rest (ncol--descend cur))))
+                    (iter (car -rest) (cdr -rest) (1+ depth))))))
+    (if (not (ncol--window-split-p split))
+        (error "Bad object received by window-of-split: %s" (type-of split))
+      (let ((rest (ncol--descend split)))
+        (iter (car rest) (cdr rest) 0)))))
+
+(defun ncol--find-managed-root ()
+  "Find the root window that is managed by ncol-mode and return it.
+This window is tagged with \\='ncol-root'.  This window is a live window
+only in the special case when it is the only window of the frame.  If no
+window is found, nil is returned."
+
+  (cl-labels (;; helper functions
+              (has-tag (window)
+                (= ncol--tag-magic-number
+                   (window-parameter window 'ncol-tag)))
+              (side-window-p (w)
+                (window-parameter w 'window-side))
+              (search (cur trees)
+                (cond (;; currently at side window
+                       (side-window-p cur)
+                       (if trees
+                           (iter (car trees) (cdr trees))
+                         ;; what do do?
+                         nil))
+
+                      (;; currently at live window
+                       (windowp cur)
+                       (cond (;; it has a tag: return it
+                              (has-tag cur)
+                              cur)
+
+                             (;; no tag but still items to check
+                              (consp trees)
+                              (iter (car trees) (cdr trees)))
+
+                             (;; no tag, no more items to check
+                              ;; should this even be possible?
+                              t nil)))
+
+                      (;; currently at split
+                       (ncol--window-split-p cur)
+                       (let ((w (window-of-split cur))
+                             (remaining (nconc trees (ncol--descend cur))))
+                         (if (has-tag w)
+                             w
+                           (iter (car remaining) (cdr remaining)))))
+
+                      t ;; this should not happen
+                      (error "Bad object encountered during search: %s"
+                             (type-of cur)))))
+    (search (ncol--window-tree) nil)))
 
 (defun ncol--rebalance-n-columns ()
   "Rebalance top-level column window group.
