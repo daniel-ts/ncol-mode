@@ -5,4 +5,4 @@ This package supplies the global =ncol-mode= minor mode that defines a couple of
 current column. When a threshold on the width is reached, the columns are split
 horizontally.
 
-It find it very simple but pleasant.
+I find it very simple but pleasant.

@@ -148,32 +148,61 @@ split below."
                  (;; must be vertical
                   t 'v)))
 
-         (find-daddy (window)
-           "Go up an ancestor of WINDOW until WINDOW is a child of rootw."
-           (if (eq (window-parent window) rootw)
-               window
-             (find-daddy (window-parent window))))
+         (within-dimensions (w h)
+           (and (>= w min-width)
+                (>= h min-height)))
 
-         (try-column-split (w)
+         (sibling-count (w)
+           (if (null (window-parent w))
+               1)
+           (cond (;; w is the root: it has only itself as a sibling
+                  (null (window-parent w)) 1)
+
+                 (;; w is within a vertical split 0|0
+                  (window-combined-p w t)
+                  (floor (/ (window-total-width (window-parent w))
+                            (window-total-width w))))
+
+                 (;; w is within a horizontal split
+                  (window-combined-p w nil)
+                  (floor (/ (window-total-height (window-parent w))
+                            (window-total-height w))))))
+
+         (find-daddy (window &optional dadw)
+           "Go up an ancestor of WINDOW until WINDOW is a child of DADW, which
+defaults to rootw."
+           (if (eq (window-parent window) (or dadw rootw))
+               window
+             (find-daddy (window-parent window) dadw)))
+
+         (try-column-splitoff (w)
            "Try splitting a new column off rootw. Return the new window or nil."
-           (let ((resulting-width (/ (window-width rootw) (1+ wcount))))
+           (let ((resulting-width (/ (window-total-width rootw) (1+ wcount))))
              (when (and (>= resulting-width min-width)
-                        (>= (window-height rootw) min-height))
+                        (>= (window-total-height rootw) min-height))
                (split-window w nil 'right))))
 
-         (try-row-split (w)
+         (try-row-splitoff (w)
            "Try splitting a new row off rootw. Return the new window or nil."
-           (let ((resulting-height (/ (window-height rootw) (1+ wcount))))
-             (when (and (>= (window-width rootw) min-width)
+           (let ((resulting-height (/ (window-total-height rootw) (1+ wcount))))
+             (when (and (>= (window-total-width rootw) min-width)
                         (>= resulting-height min-height))
                (split-window w nil 'below))))
 
-         (try-split-current-column-below (w)
-           "Try splitting a new row off the current column.
-Return the new window or nil."
-           (let ((resulting-height (/ (window-height rootw) (1+ wcount))))
-             (when (>= resulting-height min-height)
-               (split-window w nil 'below))))
+         (try-split-col-horizontal (w dadw)
+           "Try splitting a column below."
+           (if (eq w dadw)
+               ;; w and dadw equal: the column has no splits yet
+               (when (within-dimensions (window-total-width w)
+                                        (/ (window-total-height w) 2))
+                 (split-window w nil 'below))
+             ;; split below the current row of the column
+             (let* ((window (find-daddy w dadw))
+                    (wcount (sibling-count window)))
+               (when (within-dimensions (window-total-width dadw)
+                                        (/ (window-total-height dadw)
+                                           wcount))
+                 (split-window w nil 'below)))))
 
          (compute-new-window ()
            "Try splitting off a column.  If that does not work, try splitting off
@@ -181,16 +210,18 @@ either a row below (when rootw is row-based, else try splitting of a new
 row on the current).  Might return nil."
            (let* ((orient (split-orient root-split)))
              (cond ((eq orient 'n)
-                    (or (try-column-split (selected-window))
-                        (try-row-split (selected-window))))
+                    (or (try-column-splitoff rootw)
+                        (try-row-splitoff rootw)))
 
                    ((eq orient 'v)
-                    (or (try-column-split (find-daddy (selected-window)))
-                        (try-row-split (selected-window))))
+                    (or (try-column-splitoff (find-daddy (selected-window)))
+                        (try-split-col-horizontal
+                         (selected-window)
+                         (find-daddy (selected-window)))))
 
                    ((eq orient 'h)
-                    (or (try-column-split rootw)
-                        (try-row-split (selected-window))))
+                    (or (try-column-splitoff rootw)
+                        (try-row-splitoff (find-daddy (selected-window)))))
                    )))
 
          (display (window)
