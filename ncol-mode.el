@@ -21,15 +21,6 @@ Then split horizontally."
   (random)
   "A random integer that serves as the value for the window ncol-tag.")
 
-(defcustom ncol-column-min-width 80
-  "The minimal width a column must have after a vertical split.
-If a vertical split would make columns narrower than this,
-then the split is performed horizontally instead.
-
-This is a user option and can be customized."
-  :type 'integer
-  :group 'ncol-mode)
-
 (defvar ncol-previous-display-buffer-state nil
   "The previous value of `display-buffer-base-action`.
 The value is restored when ncol-mode is deactivated.")
@@ -38,8 +29,12 @@ The value is restored when ncol-mode is deactivated.")
   "Wrap `window-tree' function to skip metadata."
   (car (window-tree)))
 
-(defalias 'ncol--descend 'cddr
+(defalias 'ncol--children-of-split 'cddr
   "Descend into the split of TREE.")
+
+(defun ncol--side-window-p (w)
+  "Return p if W is a side-window, nil otherwise."
+  (not (null (window-parameter w 'window-side))))
 
 (defun ncol--window-split-p (tree)
   "Return t if TREE is an actual window tree split.
@@ -54,97 +49,13 @@ windows or splits in the rest, like:
                     (windowp obj))))
     (when (listp tree)
       (let ((2nd (cadr tree))
-            (rest (ncol--descend tree)))
+            (rest (ncol--children-of-split tree)))
         (and (booleanp (car tree))
              (and (listp 2nd)
                   (= (length 2nd) 4)
                   (-all-p #'numberp 2nd))
              (and rest
                   (-all-p #'list-or-window-p rest)))))))
-
-(defun ncol--window-tree-p (tree)
-  "Return t if TREE is an actual window tree split.
-That is: it's either a window or a window split as defined by
-`ncol--window-split-p'"
-  (or (windowp tree)
-      (ncol--window-split-p tree)))
-
-(defun ncol--find-topmost-split (tree &optional direction)
-  "Find the topmost split inside TREE.
-
-The split will be horizontal if DIRECTION \\='horizontal', vertical when
-\\='vertical' and any split when \\='any'.
-
-The found split is the one that is managed by this package.
-In case there either not HORIZONTAL or vertical splits, return nil."
-  (cl-labels ((iter (tree dir)
-                (cond (;; Seeing a window without a split
-                       (windowp tree)
-                       tree)
-
-                      (;; Seeing a split
-                       (ncol--window-split-p tree)
-                       (if (eq (car tree) dir)
-                           tree ;; found split-dir split: return
-
-                         ;; found inverse split: descend to first found split
-                         (let ((subtree
-                                (-find #'ncol--window-split-p
-                                       (ncol--descend tree))))
-                           (if (null subtree)
-                               ;; There are no further splits and I have only
-                               ;; seen splits inverse to split-dir: return
-                               nil
-                             ;; descend
-                             (iter subtree dir)))
-                         )))))
-
-    (cond (;; no splits
-           (windowp tree)
-           tree)
-
-          (;; not a tree but direction any
-           (eq direction 'any)
-           tree)
-
-          (t
-           (iter tree
-                 (cond ((eq direction 'horizontal)
-                        t)
-
-                       ((eq direction 'vertical)
-                        nil)
-
-                       (t (error "%s is not a valid direction"
-                                 (symbol-name direction)))))))))
-
-;; (defun ncol--find-first-window (tree)
-;;   "Find the first window in a (sub) TREE."
-;;   (cond ((windowp tree)
-;;          tree)
-;;         ((ncol--window-split-p tree)
-;;          (-find #'windowp (ncol--descend tree)))))
-
-(defun ncol--find-first-window (tree)
-  "Find the first window in a (sub) TREE via depth-first search.
-Each split contains a window."
-  (if (windowp tree)
-      tree
-    (ncol--find-first-window (car (ncol--descend tree)))))
-
-;; (defun ncol--find-last-window (tree)
-;;   "Find the last window in a (sub) TREE."
-;;   (cond ((windowp tree)
-;;          tree)
-;;         ((ncol--window-split-p tree)
-;;          (-find (lambda (node) (windowp node)) (nreverse (ncol--descend tree))))))
-
-(defun ncol--size-of-split (tree)
-  "Count the splits in a (sub) TREE."
-  (cond ((windowp tree)
-         1)
-        ((ncol--window-split-p tree)
-         (length (ncol--descend tree)))))
 
 (defun ncol--window-ancestor (window n)
   "Find the ancestor of WINDOW of degree N.
@@ -180,156 +91,119 @@ A subsplit is converted to the parent of the first child."
                  (if (window-live-p item)
                      item
                    (ncol--split-descend-iter item 0)))
-               (ncol--descend split)))
+               (ncol--children-of-split split)))
         (;; everything else is an error
          t (error
             "Enountered an object of unexpected type: %s"
             (type-of split)))))
 
-(defun ncol--window-descendent-p (window parent)
-  "Check if WINDOW is descendent of PARENT.
-A window is a descendent of itself.  The windows don't have to be live."
-  (cond ((null window)
-         nil)
-
-        ((eq window parent)
-         t)
-
-        (;; recur
-         t
-         (ncol--window-descendent-p (window-parent window) parent))))
-
-(defun window-of-split (split)
+(defun ncol--window-of-split (split)
   "Return the split window of SPLIT."
   (cl-labels (;; walk the split to find a window and walk up its descendents
               (iter (cur rest depth)
                 (if (windowp cur)
                     (ncol--window-ancestor cur depth)
-                  (let ((-rest (nconc rest (ncol--descend cur))))
+                  (let ((-rest (nconc rest (ncol--children-of-split cur))))
                     (iter (car -rest) (cdr -rest) (1+ depth))))))
-    (if (not (ncol--window-split-p split))
-        (error "Bad object received by window-of-split: %s" (type-of split))
-      (let ((rest (ncol--descend split)))
-        (iter (car rest) (cdr rest) 0)))))
+    (if (windowp split)
+        split
+      (let ((rest (ncol--children-of-split split)))
+        (iter (car rest) (cdr rest) 1)))))
 
-(defun ncol--find-managed-root ()
-  "Find the root window that is managed by ncol-mode and return it.
-This window is tagged with \\='ncol-root'.  This window is a live window
-only in the special case when it is the only window of the frame.  If no
-window is found, nil is returned."
+(defun ncol--find-topmost-split (tree)
+  "Find the top-most split or window in TREE that is not a side-window split.
+A side-window split contains side windows."
+  (if (ncol--side-window-p (car (ncol--windows-of-split tree)))
+      ;; proceed with the 2nd child
+      (cadr (ncol--children-of-split tree))
+    tree))
 
-  (cl-labels (;; helper functions
-              (has-tag (window)
-                (= ncol--tag-magic-number
-                   (window-parameter window 'ncol-tag)))
-              (side-window-p (w)
-                (window-parameter w 'window-side))
-              (search (cur trees)
-                (cond (;; currently at side window
-                       (side-window-p cur)
-                       (if trees
-                           (iter (car trees) (cdr trees))
-                         ;; what do do?
-                         nil))
+(defun ncol-display-buffer (buffer alist)
+  "Find the top-most window split and attempt to display BUFFER inside it.
+If the split is a single window or row-based and a new column to the right
+would exceed `min-width' in ALIST, BUFFER will be displayed in a new column
+to the right, else in a new row below.
 
-                      (;; currently at live window
-                       (windowp cur)
-                       (cond (;; it has a tag: return it
-                              (has-tag cur)
-                              cur)
+If the split is columnar, a new column is displayed to the right, same
+as above.  But if the new column with falls below
+`ncol-column-min-width', the current column (not the root split!) is
+split below."
 
-                             (;; no tag but still items to check
-                              (consp trees)
-                              (iter (car trees) (cdr trees)))
+  (let* ((min-width (alist-get 'min-width alist 80))
+         (min-height (alist-get 'min-height alist 24))
+         (root-split (ncol--find-topmost-split (ncol--window-tree)))
+         (rootw (ncol--window-of-split root-split))
+         (wcount (if (windowp root-split)
+                     1
+                   (length (ncol--windows-of-split root-split)))))
 
-                             (;; no tag, no more items to check
-                              ;; should this even be possible?
-                              t nil)))
+    (cl-labels
+        (;; helper functions
+         (split-orient (split)
+           "Return the orientation of a split."
+           (cond (;; is a window and has no "split" orientation
+                  (windowp split) 'n)
+                 (;; split horizontal? Evaluates to t
+                  (car split) 'h)
+                 (;; must be vertical
+                  t 'v)))
 
-                      (;; currently at split
-                       (ncol--window-split-p cur)
-                       (let ((w (window-of-split cur))
-                             (remaining (nconc trees (ncol--descend cur))))
-                         (if (has-tag w)
-                             w
-                           (iter (car remaining) (cdr remaining)))))
+         (find-daddy (window)
+           "Go up an ancestor of WINDOW until WINDOW is a child of rootw."
+           (if (eq (window-parent window) rootw)
+               window
+             (find-daddy (window-parent window))))
 
-                      t ;; this should not happen
-                      (error "Bad object encountered during search: %s"
-                             (type-of cur)))))
-    (search (ncol--window-tree) nil)))
+         (try-new-column-split ()
+           "Try splitting a new column off rootw. Return the new window or nil."
+           (let ((resulting-width (/ (window-width rootw) (1+ wcount))))
+             (when (and (>= resulting-width min-width)
+                        (>= (window-height rootw) min-height))
+               (split-window rootw 'right))))
 
-(defun ncol--rebalance-n-columns ()
+         (try-new-row-split ()
+           "Try splitting a new row off rootw. Return the new window or nil."
+           (let ((resulting-height (/ (window-height rootw) (1+ wcount))))
+             (when (and (>= (window-width rootw) min-width)
+                        (>= resulting-height min-height))
+               (split-window rootw 'below))))
+
+         (try-split-current-column-below ()
+           "Try splitting a new row off the current column.
+Return the new window or nil."
+           (let ((resulting-height (/ (window-height rootw) (1+ wcount))))
+             (when (>= resulting-height min-height)
+               (split-window (find-daddy (selected-window))
+                             'below))))
+
+         (compute-new-window ()
+           "Try splitting off a column.  If that does not work, try splitting off
+either a row below (when rootw is row-based, else try splitting of a new
+row on the current).  Might return nil."
+           (or (try-new-column-split)
+               (if (eq (split-orient root-split) 'v)
+                   (try-split-current-column-below)
+                 (try-new-row-split))))
+
+         (display (window)
+           "Display the buffer in WINDOW.  The buffer is closed over."
+           (set-window-buffer window buffer)
+           (balance-windows (window-parent window))
+           (select-window window)))
+
+      (let ((new-window (compute-new-window)))
+        (when new-window
+          (display new-window)))
+      )))
+
+(defun ncol--rebalance ()
   "Rebalance top-level column window group.
 The group is a split as defined by `ncol--display-buffer-n-columns'.
 Intended for `window-state-change-hook'."
-  (when (ncol--window-split-p (ncol--window-tree))
-    (balance-windows
-     (window-parent
-      (ncol--find-first-window
-       (ncol--window-tree))))))
-
-(defun ncol-display-buffer-n-columns (buffer _)
-  "Split the current column to the right and display BUFFER.
-If the new column would have width exceeding `ncol-column-min-width'.
-This function conforms to `display-buffer'."
-  (let* ((topmost (ncol--find-topmost-split
-                   (ncol--window-tree) 'vertical))
-         (top-columns
-          (if topmost
-              (ncol--windows-of-split topmost)
-            nil))
-         (column-count
-          (if topmost
-              ;; there is a topmost vertical split: count the columns
-              (length top-columns)
-            ;; there is no topmost vertical split: there is only one column
-            1))
-         (resulting-width (/ (frame-width) (+ column-count 1))))
-
-    (when (>= resulting-width ncol-column-min-width)
-      (let* ((col-to-split
-              (-find  (lambda (col) (ncol--window-descendent-p (selected-window) col))
-                      top-columns))
-             (new-window (split-window col-to-split nil 'right)))
-
-        (set-window-buffer new-window buffer)
-        (balance-windows (window-parent new-window))
-        (select-window new-window))
-      )))
-
-(defun ncol-display-buffer-in-rows (buffer _)
-  "Split the current row below and display BUFFER.
-But only if the topmost split is horizontal.
-This function conforms to `display-buffer'."
-  (let* ((topmost (ncol--find-topmost-split (ncol--window-tree) 'horizontal))
-         (top-rows
-          (if topmost
-              (ncol--windows-of-split topmost)
-            nil)))
-
-    (when (and (ncol--window-split-p topmost) ;; not a single window
-               (car topmost)) ;; t means horizontal
-      ;; split only if the topmost split is horizontal
-      (let* ((row-to-split
-              ;; find the row in top-rows the current window is in
-              (-find (lambda (row)
-                       (ncol--window-descendent-p (selected-window) row))
-                      top-rows))
-             (new-window (split-window row-to-split nil 'below)))
-
-        (set-window-buffer new-window buffer)
-        (balance-windows (window-parent new-window))
-        (select-window new-window)))))
-
-(defun ncol-display-buffer-split-below (buffer _)
-  "Split the current column horizontally and display BUFFER.
-This function conforms to `display-buffer'."
-  (let ((new-window (split-window (selected-window) nil 'below)))
-    (add-hook 'window-state-change-hook #'ncol--rebalance-n-columns)
-    (set-window-buffer new-window buffer)
-    (balance-windows (window-parent new-window))
-    (select-window new-window)))
+  (balance-windows
+     (ncol--window-of-split
+      (ncol--find-topmost-split
+       (ncol--window-tree)))))
 
 (defun ncol-display-buffer-replace-ibuffer (buffer _)
   "Display BUFFER in the current window if it displays `ibuffer', replacing it."
@@ -340,9 +214,7 @@ This function conforms to `display-buffer'."
 
 (defcustom display-buffer-ncol-action '((display-buffer-reuse-window
                                          ncol-display-buffer-replace-ibuffer
-                                         ncol-display-buffer-n-columns
-                                         ncol-display-buffer-in-rows
-                                         ncol-display-buffer-split-below)
+                                         ncol-display-buffer)
                                         . ((reusable-frames . nil)))
   "Defines a list of `display-buffer' actions.
 It is structured like `display-buffer-base-action' etc. You can customize how
@@ -370,11 +242,11 @@ ncol-mode displays buffers by interleaving your own desired functions."
       (progn
         (setq ncol-previous-display-buffer-state display-buffer-base-action)
         (setq display-buffer-base-action display-buffer-ncol-action)
-        (add-hook 'window-state-change-hook #'ncol--rebalance-n-columns))
+        (add-hook 'window-state-change-hook #'ncol--rebalance))
     ;; Disabling
     (progn
       (setq display-buffer-base-action ncol-previous-display-buffer-state)
-      (remove-hook 'window-state-change-hook #'ncol--rebalance-n-columns))))
+      (remove-hook 'window-state-change-hook #'ncol--rebalance))))
 
 (provide 'ncol-mode)
 ;;; ncol-mode.el ends here
