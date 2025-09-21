@@ -159,22 +159,21 @@ split below."
            (let ((resulting-width (/ (window-width rootw) (1+ wcount))))
              (when (and (>= resulting-width min-width)
                         (>= (window-height rootw) min-height))
-               (split-window rootw 'right))))
+               (split-window rootw nil 'right))))
 
          (try-new-row-split ()
            "Try splitting a new row off rootw. Return the new window or nil."
            (let ((resulting-height (/ (window-height rootw) (1+ wcount))))
              (when (and (>= (window-width rootw) min-width)
                         (>= resulting-height min-height))
-               (split-window rootw 'below))))
+               (split-window rootw nil 'below))))
 
          (try-split-current-column-below ()
            "Try splitting a new row off the current column.
 Return the new window or nil."
            (let ((resulting-height (/ (window-height rootw) (1+ wcount))))
              (when (>= resulting-height min-height)
-               (split-window (find-daddy (selected-window))
-                             'below))))
+               (split-window (find-daddy (selected-window)) nil 'below))))
 
          (compute-new-window ()
            "Try splitting off a column.  If that does not work, try splitting off
@@ -188,7 +187,7 @@ row on the current).  Might return nil."
          (display (window)
            "Display the buffer in WINDOW.  The buffer is closed over."
            (set-window-buffer window buffer)
-           (balance-windows (window-parent window))
+           (balance-windows rootw)
            (select-window window)))
 
       (let ((new-window (compute-new-window)))
