@@ -130,7 +130,7 @@ as above.  But if the new column with falls below
 split below."
 
   (let* ((min-width (alist-get 'min-width alist 80))
-         (min-height (alist-get 'min-height alist 24))
+         (min-height (alist-get 'min-height alist 16))
          (root-split (ncol--find-topmost-split (ncol--window-tree)))
          (rootw (ncol--window-of-split root-split))
          (wcount (if (windowp root-split)
@@ -154,35 +154,44 @@ split below."
                window
              (find-daddy (window-parent window))))
 
-         (try-new-column-split ()
+         (try-column-split (w)
            "Try splitting a new column off rootw. Return the new window or nil."
            (let ((resulting-width (/ (window-width rootw) (1+ wcount))))
              (when (and (>= resulting-width min-width)
                         (>= (window-height rootw) min-height))
-               (split-window rootw nil 'right))))
+               (split-window w nil 'right))))
 
-         (try-new-row-split ()
+         (try-row-split (w)
            "Try splitting a new row off rootw. Return the new window or nil."
            (let ((resulting-height (/ (window-height rootw) (1+ wcount))))
              (when (and (>= (window-width rootw) min-width)
                         (>= resulting-height min-height))
-               (split-window rootw nil 'below))))
+               (split-window w nil 'below))))
 
-         (try-split-current-column-below ()
+         (try-split-current-column-below (w)
            "Try splitting a new row off the current column.
 Return the new window or nil."
            (let ((resulting-height (/ (window-height rootw) (1+ wcount))))
              (when (>= resulting-height min-height)
-               (split-window (find-daddy (selected-window)) nil 'below))))
+               (split-window w nil 'below))))
 
          (compute-new-window ()
            "Try splitting off a column.  If that does not work, try splitting off
 either a row below (when rootw is row-based, else try splitting of a new
 row on the current).  Might return nil."
-           (or (try-new-column-split)
-               (if (eq (split-orient root-split) 'v)
-                   (try-split-current-column-below)
-                 (try-new-row-split))))
+           (let* ((orient (split-orient root-split)))
+             (cond ((eq orient 'n)
+                    (or (try-column-split (selected-window))
+                        (try-row-split (selected-window))))
+
+                   ((eq orient 'v)
+                    (or (try-column-split (find-daddy (selected-window)))
+                        (try-row-split (selected-window))))
+
+                   ((eq orient 'h)
+                    (or (try-column-split rootw)
+                        (try-row-split (selected-window))))
+                   )))
 
          (display (window)
            "Display the buffer in WINDOW.  The buffer is closed over."
