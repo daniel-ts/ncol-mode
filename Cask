@@ -2,7 +2,7 @@
 (source melpa)
 
 (package "ncol-mode"
-  "0.2.0"
+  "0.2.1"
   "Dynamic multi-column window management for Emacs.")
 
 ;; Runtime dependencies
