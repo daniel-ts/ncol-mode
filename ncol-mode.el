@@ -186,7 +186,8 @@ defaults to rootw."
          (try-row-splitoff (w)
            "Try splitting a new row off rootw. Return the new window or nil."
            (let ((resulting-height (/ (window-total-height rootw) (1+ wcount))))
-             (when (witin-dimensions (window-total-width rootw) resulting-height)
+             (when (within-dimensions (window-total-width rootw)
+                                      resulting-height)
                (split-window w nil 'below))))
 
          (try-split-col-horizontal (w dadw)
