@@ -172,9 +172,9 @@ split below."
          (find-daddy (window &optional dadw)
            "Go up an ancestor of WINDOW until WINDOW is a child of DADW, which
 defaults to rootw."
-           (if (eq (window-parent window) (or dadw rootw))
-               window
-             (find-daddy (window-parent window) dadw)))
+           (cond ((null (window-parent window)) rootw)
+                 ((eq (window-parent window) (or dadw rootw)) window)
+                 (t (find-daddy (window-parent window) dadw))))
 
          (try-column-splitoff (w)
            "Try splitting a new column off rootw. Return the new window or nil."
