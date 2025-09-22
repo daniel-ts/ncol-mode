@@ -149,24 +149,25 @@ split below."
                   t 'v)))
 
          (within-dimensions (w h)
+           "Check if W and H are exceeding `min-width' and `min-height'."
            (and (>= w min-width)
                 (>= h min-height)))
 
          (sibling-count (w)
-           (if (null (window-parent w))
-               1)
-           (cond (;; w is the root: it has only itself as a sibling
-                  (null (window-parent w)) 1)
+           "Count sibling windows of W, itself included."
+           (let ((parentw (window-parent w)))
+             (cond (;; w is the root: it has only itself as a sibling
+                    (null parentw) 1)
 
-                 (;; w is within a vertical split 0|0
-                  (window-combined-p w t)
-                  (floor (/ (window-total-width (window-parent w))
-                            (window-total-width w))))
+                   (;; w is within a vertical split 0|0
+                    (window-combined-p w t)
+                    (floor (/ (window-total-width parentw)
+                              (window-total-width w))))
 
-                 (;; w is within a horizontal split
-                  (window-combined-p w nil)
-                  (floor (/ (window-total-height (window-parent w))
-                            (window-total-height w))))))
+                   (;; w is within a horizontal split
+                    (window-combined-p w nil)
+                    (floor (/ (window-total-height parentw)
+                              (window-total-height w)))))))
 
          (find-daddy (window &optional dadw)
            "Go up an ancestor of WINDOW until WINDOW is a child of DADW, which
@@ -178,15 +179,14 @@ defaults to rootw."
          (try-column-splitoff (w)
            "Try splitting a new column off rootw. Return the new window or nil."
            (let ((resulting-width (/ (window-total-width rootw) (1+ wcount))))
-             (when (and (>= resulting-width min-width)
-                        (>= (window-total-height rootw) min-height))
+             (when (within-dimensions resulting-width
+                                      (window-total-height rootw))
                (split-window w nil 'right))))
 
          (try-row-splitoff (w)
            "Try splitting a new row off rootw. Return the new window or nil."
            (let ((resulting-height (/ (window-total-height rootw) (1+ wcount))))
-             (when (and (>= (window-total-width rootw) min-width)
-                        (>= resulting-height min-height))
+             (when (witin-dimensions (window-total-width rootw) resulting-height)
                (split-window w nil 'below))))
 
          (try-split-col-horizontal (w dadw)
@@ -230,6 +230,7 @@ row on the current).  Might return nil."
            (balance-windows rootw)
            (select-window window)))
 
+      ;; try computing a new window and in case of succes, display it
       (let ((new-window (compute-new-window)))
         (when new-window
           (display new-window)))
