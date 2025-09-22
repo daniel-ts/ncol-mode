@@ -2,12 +2,8 @@
 (source melpa)
 
 (package "ncol-mode"
-  "0.2.2"
+  "0.3.0"
   "Dynamic multi-column window management for Emacs.")
 
-;; Runtime dependencies
-(depends-on "dash")
-
-;; Development dependencies
-(development
- )
+(depends-on "emacs" "27.1")
+(depends-on "dash" "1.5")
