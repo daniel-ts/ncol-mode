@@ -129,7 +129,7 @@ as above.  But if the new column with falls below
 `ncol-column-min-width', the current column (not the root split!) is
 split below."
 
-  (let* ((min-width (alist-get 'min-width alist 80))
+  (let* ((min-width (alist-get 'min-width alist fill-column))
          (min-height (alist-get 'min-height alist 16))
          (root-split (ncol--find-topmost-split (ncol--window-tree)))
          (rootw (ncol--window-of-split root-split))
