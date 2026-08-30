@@ -118,6 +118,15 @@ A side-window split contains side windows."
       (cadr (ncol--children-of-split tree))
     tree))
 
+(if (fboundp 'window-main-window)
+    (defalias 'ncol--main-window #'window-main-window)
+  (defun ncol--main-window (&optional frame)
+    "Return FRAME's main (non-side) window.
+On Emacs 31+ this is an alias of `window-main-window'."
+    (ncol--window-of-split
+     (ncol--find-topmost-split
+      (car (window-tree frame))))))
+
 (defun ncol-display-buffer (buffer alist)
   "Find the top-most window split and attempt to display BUFFER inside it.
 If the split is a single window or row-based and a new column to the right
