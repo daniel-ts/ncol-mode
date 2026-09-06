@@ -8,6 +8,7 @@
 
 
 ;;; Code:
+(require 'cl-lib)
 (require 'window)
 
 (defgroup ncol-mode nil
@@ -50,9 +51,13 @@ t if that is the case, nil otherwise."
            2))
       min-height))
 
-(defun ncol--side-window-p (window)
-  "Tests if WINDOW is a side window."
-  (not (null (window-parameter window 'window-side))))
+(defun ncol--side-window-p (window &optional side)
+  "Tests if WINDOW is a side window.
+When optional SIDE is supplied, test if the window is a side window and
+on that side."
+  (if side
+      (eq (window-parameter window 'window-side) side)
+    (not (null (window-parameter window 'window-side)))))
 
 (defun ncol--find-cur-main-column (window)
   "Finds the main column for WINDOW."
@@ -79,6 +84,31 @@ t if that is the case, nil otherwise."
          (ncol--find-cur-main-column (window-parent window)))))
 
 
+(defun ncol--find-main (window &optional row)
+  (cond (;; I'm in the root window
+         (eq (frame-root-window) window)
+         (window-main-window))
+
+        (;; I'm in the main window
+         (eq (window-main-window) window)
+         window)
+
+        (;; I'm in a side window
+         (ncol--side-window-p window)
+         (window-main-window))
+
+        (;; I'm in the main col or row if ROW is non-nil
+         (and (eq (window-parent window) (window-main-window))
+              (funcall
+               (if row #'ncol--window-h-split-p #'ncol--window-v-split-p)
+               (window-main-window)))
+         window)
+
+        (;; I'm in a normal window: go up
+         t
+         (ncol--find-cur-main-column (window-parent window)))))
+
+
 (defun ncol--try-create-window (min-width min-height)
   "Tries to create a window.
 It prefers t splitt of a new main column if it would get atleast MIN-WIDTH.
@@ -86,24 +116,87 @@ If that fails, it tries to split the current main column horizontally, provided
 that the new window gets atleast MIN-HEIGHT.
 Else it assumes that the frame is in \"portrait mode\" and splits off a row.
 If that fails it gives up and returns nil."
-  (or
-   ;; try to split off a new main column
-   (when (ncol--window-v-splittable-p (window-main-window) min-width)
-     (split-window
-      (ncol--find-cur-main-column (selected-window)) t 'right))
 
-   ;; else try to split spit the current main column down
-   (when (and (ncol--window-v-split-p (window-main-window))
-              (ncol--window-h-splittable-p
-               (ncol--find-cur-main-column (selected-window)) min-height))
-     (split-window (selected-window) t 'below))
+  (cl-labels
+      (;; helper functions
+       (try-create-main-col (current-window)
+         (when (ncol--window-v-splittable-p (window-main-window) min-width)
+           (split-window
+            (window-main-window)
+            t
+            (if (ncol--side-window-p current-window 'left) 'left 'right))))
 
-   ;; else assume row mode and try to split off rows
-   (when (and (or (ncol--window-h-split-p (window-main-window))
-                  (null (ncol--window-split-p (window-main-window))))
-              (ncol--window-h-splittable-p (window-main-window) min-height))
-     (split-window (selected-window) t 'below))
-   ))
+       (try-create-col-split (current-window)
+         (when (and (ncol--window-v-split-p (window-main-window))
+                    (not (ncol--side-window-p current-window))
+                    (ncol--window-h-splittable-p
+                     (ncol--find-main current-window) min-height))
+           (split-window current-window t 'below)))
+
+       (try-col-split-from-side-window (current-window)
+         (when (and (ncol--window-v-split-p (window-main-window))
+                    (not (ncol--window-v-splittable-p (window-main-window) min-width)))
+           (cond ((ncol--side-window-p current-window 'left)
+                  (try-create-col-split (window-in-direction 'right)))
+
+                 ((ncol--side-window-p current-window 'right)
+                  (try-create-col-split (window-in-direction 'left))
+                  )
+
+                 ((ncol--side-window-p current-window 'top)
+                  (try-create-col-split (window-in-direction 'below))
+                  )
+
+                 ((ncol--side-window-p current-window 'bottom)
+                  (try-create-col-split (window-in-direction 'above))))))
+
+       (try-create-main-row (current-window)
+         (when (and (ncol--window-h-splittable-p (window-main-window) min-height)
+                    (not (ncol--window-v-split-p (window-main-window))))
+
+           (cond ((ncol--side-window-p current-window 'top)
+                  (split-window
+                   ;; window
+                   (if (ncol--window-h-split-p (window-main-window))
+                       (window-top-child (window-main-window))
+                     (window-main-window))
+                   t 'top))
+
+                 ((ncol--side-window-p current-window 'bottom)
+                  (split-window
+                   ;; window
+                   (if (ncol--window-h-split-p (window-main-window))
+                       (window-last-child (window-main-window))
+                     (window-main-window))
+                   t 'bottom))
+
+                 (;; we're currently in a left or right side window
+                  (ncol--side-window-p current-window)
+                  (split-window
+                   ;; window
+                   (if (ncol--window-h-split-p (window-main-window))
+                       (window-last-child (window-main-window))
+                     (window-main-window))
+                   t 'bottom)
+                  )
+
+                 (;; we are not in a side window: make a new row below
+                  t
+                  (split-window (ncol--find-main current-window t) t 'below))))))
+
+    (or
+     ;; try to split off a new main column
+     (try-create-main-col (selected-window))
+
+     ;; next: try to split spit the current main column down
+     (try-create-col-split (selected-window))
+
+     ;; next: handle case when we're in a side window
+     (try-col-split-from-side-window (selected-window))
+
+     ;; else assume row mode and try to split off rows
+     (try-create-main-row (selected-window))
+     )))
 
 (defun ncol-display-buffer (buffer alist)
   "Find the top-most window split and attempt to display BUFFER inside it.
