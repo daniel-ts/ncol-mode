@@ -121,10 +121,21 @@ If that fails it gives up and returns nil."
       (;; helper functions
        (try-create-main-col (current-window)
          (when (ncol--window-v-splittable-p (window-main-window) min-width)
-           (split-window
-            (window-main-window)
-            t
-            (if (ncol--side-window-p current-window 'left) 'left 'right))))
+
+           (cond (;; if we're in the left side window, split a new left column
+                  (ncol--side-window-p current-window 'left)
+                  (split-window
+                   (window-child (window-main-window)) t 'left))
+
+                 (;; if we're in any other side window, split a right column
+                  (ncol--side-window-p current-window)
+                  (split-window
+                   (window-last-child (window-main-window)) t 'right))
+
+                 (;; else split this column to the right
+                  t
+                  (split-window
+                   (ncol--find-main current-window) t 'right)))))
 
        (try-create-col-split (current-window)
          (when (and (ncol--window-v-split-p (window-main-window))
