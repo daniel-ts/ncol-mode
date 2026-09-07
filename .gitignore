@@ -1,3 +1,5 @@
 /.cask/
 /dist/
 **/*.elc
+/ncol-mode-autoloads.el
+/ncol-mode-pkg.el
