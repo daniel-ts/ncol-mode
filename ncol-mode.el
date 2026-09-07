@@ -85,6 +85,8 @@ on that side."
 
 
 (defun ncol--find-main (window &optional row)
+  "Find the main column WINDOW is placed at.
+When ROW is non-nil, search for the row."
   (cond (;; I'm in the root window
          (eq (frame-root-window) window)
          (window-main-window))
@@ -95,6 +97,10 @@ on that side."
 
         (;; I'm in a side window
          (ncol--side-window-p window)
+         (window-main-window))
+
+        (;; I'm in the minibuffer
+         (window-minibuffer-p window)
          (window-main-window))
 
         (;; I'm in the main col or row if ROW is non-nil
