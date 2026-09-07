@@ -146,26 +146,33 @@ If that fails it gives up and returns nil."
        (try-create-col-split (current-window)
          (when (and (ncol--window-v-split-p (window-main-window))
                     (not (ncol--side-window-p current-window))
+                    (not (window-minibuffer-p current-window))
                     (ncol--window-h-splittable-p
                      (ncol--find-main current-window) min-height))
            (split-window current-window t 'below)))
 
-       (try-col-split-from-side-window (current-window)
+       (try-col-split-from-side-window-or-minibuffer (current-window)
          (when (and (ncol--window-v-split-p (window-main-window))
                     (not (ncol--window-v-splittable-p (window-main-window) min-width)))
            (cond ((ncol--side-window-p current-window 'left)
-                  (try-create-col-split (window-in-direction 'right)))
+                  (try-create-col-split (window-in-direction 'right current-window)))
 
                  ((ncol--side-window-p current-window 'right)
-                  (try-create-col-split (window-in-direction 'left))
-                  )
+                  (try-create-col-split (window-in-direction 'left current-window)))
 
                  ((ncol--side-window-p current-window 'top)
-                  (try-create-col-split (window-in-direction 'below))
-                  )
+                  (try-create-col-split (window-in-direction 'below current-window)))
 
                  ((ncol--side-window-p current-window 'bottom)
-                  (try-create-col-split (window-in-direction 'above))))))
+                  (try-create-col-split (window-in-direction 'above current-window)))
+
+                 ((window-minibuffer-p current-window)
+                  (if (ncol--side-window-p (window-in-direction 'above))
+                      ;; above the minibuffer might be a side window
+                      (try-create-col-split
+                       (window-in-direction 'above
+                                            (window-in-direction 'above)))
+                    (try-create-col-split (window-in-direction 'above)))))))
 
        (try-create-main-row (current-window)
          (when (and (ncol--window-h-splittable-p (window-main-window) min-height)
@@ -187,6 +194,9 @@ If that fails it gives up and returns nil."
                      (window-main-window))
                    t 'bottom))
 
+                 ((window-minibuffer-p current-window)
+                  (try-create-main-row (window-in-direction 'above current-window)))
+
                  (;; we're currently in a left or right side window
                   (ncol--side-window-p current-window)
                   (split-window
@@ -197,7 +207,7 @@ If that fails it gives up and returns nil."
                    t 'bottom)
                   )
 
-                 (;; we are not in a side window: make a new row below
+                 (;; we are not in a side window or the minibuffer: make a new row below
                   t
                   (split-window (ncol--find-main current-window t) t 'below))))))
 
@@ -209,7 +219,7 @@ If that fails it gives up and returns nil."
      (try-create-col-split (selected-window))
 
      ;; next: handle case when we're in a side window
-     (try-col-split-from-side-window (selected-window))
+     (try-col-split-from-side-window-or-minibuffer (selected-window))
 
      ;; else assume row mode and try to split off rows
      (try-create-main-row (selected-window))
